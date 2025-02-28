@@ -1,0 +1,27 @@
+{
+  "name": "youtube",
+  "version": "1.0.0",
+  "description": "YouTube thumbnail analyzer using face-api.js",
+  "main": "dist/index.js",
+  "scripts": {
+    "start": "node dist/index.js",
+    "dev": "nodemon src/index.ts",
+    "build": "tsc",
+    "watch": "tsc -w",
+    "download-models": "ts-node src/models-downloader.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.5",
+    "@types/puppeteer": "^5.4.7",
+    "nodemon": "^3.1.9",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs-node": "^4.22.0",
+    "canvas": "^3.1.0",
+    "dotenv": "^16.4.7",
+    "face-api.js": "^0.22.2",
+    "puppeteer": "^24.3.0"
+  }
+}
