@@ -11,7 +11,8 @@ faceapi.env.monkeyPatch({
 export class YouTubeBot {
   private browser: Browser | null = null;
   private page: Page | null = null;
-  private watchedVideos: Map<string, { title: string; timestamp: number }> = new Map();
+  private watchedVideos: Map<string, { title: string; timestamp: number }> =
+    new Map();
 
   async init() {
     this.browser = await puppeteer.launch({
@@ -40,21 +41,12 @@ export class YouTubeBot {
 
   async login() {
     if (!this.page) throw new Error("Browser not initialized");
-
     await this.page.goto("https://youtube.com");
-
-    // 로그인 버튼 클릭
     await this.page.waitForSelector("#buttons ytd-button-renderer a");
-    await this.sleep(1000);
+    await this.sleep(500);
     await this.page.click("#buttons ytd-button-renderer a");
-
-    // 로그인이 완료될 때까지 대기 (아바타 이미지가 나타날 때까지)
-    await this.page.waitForSelector("#avatar-btn", {
-      timeout: 300000, // 5분 대기
-    });
-
-    // 추가 대기 시간
-    await this.sleep(2000);
+    await this.page.waitForSelector("#avatar-btn", { timeout: 300000 });
+    await this.sleep(1000);
   }
 
   async searchAndAnalyze(keyword: string) {
@@ -62,12 +54,12 @@ export class YouTubeBot {
 
     // YouTube 메인으로 이동
     await this.page.goto("https://youtube.com");
-    await this.sleep(2000);
+    await this.sleep(1000);
 
     // 검색어 입력
     await this.page.waitForSelector('input[name="search_query"]');
     await this.page.click('input[name="search_query"]');
-    await this.sleep(500);
+    await this.sleep(250);
 
     // 기존 검색어 삭제
     await this.page.keyboard.down("Control");
@@ -77,33 +69,36 @@ export class YouTubeBot {
 
     // 새 검색어 입력
     await this.page.type('input[name="search_query"]', keyword, { delay: 100 });
-    await this.sleep(500);
+    await this.sleep(250);
 
     // Enter 키로 검색 실행
     await this.page.keyboard.press("Enter");
 
     // 검색 결과 로딩 대기 (시간 증가)
     await this.page.waitForSelector("ytd-video-renderer", { timeout: 10000 });
-    await this.sleep(5000); // 충분한 로딩 시간 제공
-    
-    // "동영상" 필터 클릭 (title 속성 사용)
+    await this.sleep(2500);
+
+    // "시청하지 않음" 필터 클릭 (title 속성 사용)
     await this.page.evaluate(() => {
-      const formattedStrings = document.querySelectorAll('yt-formatted-string');
-      const videoFilter = Array.from(formattedStrings).find(el => el.getAttribute('title') === '동영상');
+      const formattedStrings = document.querySelectorAll("yt-formatted-string");
+      const videoFilter = Array.from(formattedStrings).find(
+        (el) => el.getAttribute("title") === "시청하지 않음"
+      );
       if (videoFilter) {
         (videoFilter as any).click();
       } else {
-        console.log('동영상 필터를 찾을 수 없습니다.');
+        console.log("시청하지 않음 필터를 찾을 수 없습니다.");
       }
     });
     await this.sleep(2000);
 
     let foundValidVideo = false;
     let scrollAttempts = 0;
-    const maxScrollAttempts = 5;
+    const maxScrollAttempts = 10;
 
-    while (!foundValidVideo && scrollAttempts < maxScrollAttempts) {
-      const videos = await this.page.evaluate(() => {
+    const videoEvaluate = async () => {
+      if (!this.page) throw new Error("Browser not initialized");
+      return await this.page.evaluate(() => {
         const items = document.querySelectorAll("ytd-video-renderer");
         return Array.from(items).map((item) => {
           const titleElement = item.querySelector("#video-title");
@@ -124,35 +119,73 @@ export class YouTubeBot {
           };
         });
       });
+    };
 
+    while (!foundValidVideo && scrollAttempts < maxScrollAttempts) {
+      let videos = await videoEvaluate();
       console.log(`검색된 영상 수: ${videos.length}`);
+
+      while (videos.filter((v) => v.thumbnailUrl).length === 0) {
+        console.log("썸네일 URL을 하나도 찾지 못했습니다.");
+
+        // 스크롤 다운
+        await this.page.evaluate(() => {
+          window.scrollBy(0, window.innerHeight * 3);
+        });
+        await this.sleep(2000);
+        scrollAttempts++;
+
+        videos = await videoEvaluate();
+      }
+
+      videos = videos.filter((v) => v.thumbnailUrl);
 
       // 시청 기록 확인 로직 개선
       for (const video of videos) {
-        const watchedInfo = this.watchedVideos.get(video.id);
-        if (watchedInfo) {
-          const hoursSinceWatched = (Date.now() - watchedInfo.timestamp) / (1000 * 60 * 60);
-          console.log(`'${video.title}' 시청 후 ${hoursSinceWatched.toFixed(1)}시간 경과`);
+        const isWatched = Array.from(this.watchedVideos.values()).some(
+          (watchedVideo) =>
+            // 제목이 부분적으로 일치하는지 확인
+            watchedVideo.title
+              .toLowerCase()
+              .includes(video.title.toLowerCase()) ||
+            video.title.toLowerCase().includes(watchedVideo.title.toLowerCase())
+        );
+
+        if (isWatched) {
+          const watchedVideo = Array.from(this.watchedVideos.entries()).find(
+            ([_, v]) =>
+              v.title.toLowerCase().includes(video.title.toLowerCase()) ||
+              video.title.toLowerCase().includes(v.title.toLowerCase())
+          );
+          if (watchedVideo) {
+            const hoursSinceWatched =
+              (Date.now() - watchedVideo[1].timestamp) / (1000 * 60 * 60);
+            console.log(
+              `'${video.title}' 유사 영상 시청 후 ${hoursSinceWatched.toFixed(
+                1
+              )}시간 경과`
+            );
+          }
           video.watched = true;
           continue;
         }
 
-        if (video.title.toLowerCase().includes("룩북")) {
-          console.log(`분석 중: ${video.title}`);
-          video.hasFemale = await this.analyzeThumbnail(video.thumbnailUrl);
-          
-          if (video.hasFemale) {
-            foundValidVideo = true;
-            await this.playVideo(video);
-            return [video];
-          }
+        await this.sleep(1500);
+
+        console.log(`분석 중: ${video.title}`);
+        video.hasFemale = await this.analyzeThumbnail(video.thumbnailUrl);
+
+        if (video.hasFemale) {
+          foundValidVideo = true;
+          await this.playVideo(video);
+          return [video];
         }
       }
 
       if (!foundValidVideo) {
         console.log("적합한 영상을 찾지 못했습니다. 스크롤 다운...");
         await this.page.evaluate(() => {
-          window.scrollBy(0, window.innerHeight * 2);
+          window.scrollBy(0, window.innerHeight * 3);
         });
         await this.sleep(2000);
         scrollAttempts++;
@@ -214,7 +247,7 @@ export class YouTubeBot {
       }
     }, video.title);
 
-    await this.sleep(5000);
+    await this.sleep(2500);
 
     // 광고 스킵 처리
     try {
@@ -227,14 +260,15 @@ export class YouTubeBot {
     }
 
     // 영상 길이 확인 및 시청
-    const watchDuration = await this.page?.evaluate(() => {
-      const video = document.querySelector('video');
-      if (video) {
-        // 영상 길이(초)와 240초(4분) 중 작은 값을 선택
-        return Math.min(video.duration * 1000, 240000);
-      }
-      return 30000; // 영상 길이를 못 가져온 경우 30초 시청
-    }) || 30000;
+    const watchDuration =
+      (await this.page?.evaluate(() => {
+        const video = document.querySelector("video");
+        if (video) {
+          // 영상 길이(초)와 240초(4분) 중 작은 값을 선택
+          return Math.min(video.duration * 1000, 240000);
+        }
+        return 30000; // 영상 길이를 못 가져온 경우 30초 시청
+      })) || 30000;
 
     console.log(`영상 시청 시간: ${Math.round(watchDuration / 1000)}초`);
     await this.sleep(watchDuration);
@@ -242,7 +276,7 @@ export class YouTubeBot {
     // 시청 기록에 타임스탬프와 함께 저장
     this.watchedVideos.set(video.id, {
       title: video.title,
-      timestamp: Date.now()
+      timestamp: Date.now(),
     });
     console.log(`재생 완료: ${video.title} (ID: ${video.id})`);
   }

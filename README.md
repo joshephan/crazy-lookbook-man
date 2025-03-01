@@ -36,7 +36,11 @@ pnpm run download-models
 4. 실행 방법
 
 ```
-pnpm run start
+pnpm build
+pnpm start
+
+# watch mode
+pnpm dev
 ```
 
 ## 기술 스택
